@@ -26,6 +26,7 @@ import android.view.inputmethod.ExtractedTextRequest;
 import android.view.inputmethod.InputMethodManager;
 import android.view.inputmethod.InputMethodSubtype;
 import io.flutter.Log;
+import io.flutter.embedding.engine.FlutterJNI;
 import io.flutter.embedding.engine.systemchannels.TextInputChannel;
 
 class InputConnectionAdaptor extends BaseInputConnection {
@@ -37,6 +38,7 @@ class InputConnectionAdaptor extends BaseInputConnection {
   private int mBatchCount;
   private InputMethodManager mImm;
   private final Layout mLayout;
+  private FlutterTextUtils flutterTextUtils;
   // Used to determine if Samsung-specific hacks should be applied.
   private final boolean isSamsung;
 
@@ -75,6 +77,18 @@ class InputConnectionAdaptor extends BaseInputConnection {
           && composingEnd == value.composingEnd
           && text.equals(value.text);
     }
+
+    @Override
+    public int hashCode() {
+      final int prime = 31;
+      int result = 1;
+      result = prime * result + selectionStart;
+      result = prime * result + selectionEnd;
+      result = prime * result + composingStart;
+      result = prime * result + composingEnd;
+      result = prime * result + text.hashCode();
+      return result;
+    }
   }
 
   @SuppressWarnings("deprecation")
@@ -83,7 +97,8 @@ class InputConnectionAdaptor extends BaseInputConnection {
       int client,
       TextInputChannel textInputChannel,
       Editable editable,
-      EditorInfo editorInfo) {
+      EditorInfo editorInfo,
+      FlutterJNI flutterJNI) {
     super(view, true);
     mFlutterView = view;
     mClient = client;
@@ -91,6 +106,7 @@ class InputConnectionAdaptor extends BaseInputConnection {
     mEditable = editable;
     mEditorInfo = editorInfo;
     mBatchCount = 0;
+    this.flutterTextUtils = new FlutterTextUtils(flutterJNI);
     // We create a dummy Layout with max width so that the selection
     // shifting acts as if all text were in one line.
     mLayout =
@@ -105,6 +121,15 @@ class InputConnectionAdaptor extends BaseInputConnection {
     mImm = (InputMethodManager) view.getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
 
     isSamsung = isSamsung();
+  }
+
+  public InputConnectionAdaptor(
+      View view,
+      int client,
+      TextInputChannel textInputChannel,
+      Editable editable,
+      EditorInfo editorInfo) {
+    this(view, client, textInputChannel, editable, editorInfo, new FlutterJNI());
   }
 
   // Send the current state of the editable to Flutter.
@@ -275,6 +300,7 @@ class InputConnectionAdaptor extends BaseInputConnection {
   public boolean setSelection(int start, int end) {
     boolean result = super.setSelection(start, end);
     markDirty();
+    updateEditingState();
     return result;
   }
 
@@ -301,51 +327,26 @@ class InputConnectionAdaptor extends BaseInputConnection {
       if (event.getKeyCode() == KeyEvent.KEYCODE_DEL) {
         int selStart = clampIndexToEditable(Selection.getSelectionStart(mEditable), mEditable);
         int selEnd = clampIndexToEditable(Selection.getSelectionEnd(mEditable), mEditable);
+        if (selStart == selEnd && selStart > 0) {
+          // Extend selection to left of the last character
+          selStart = flutterTextUtils.getOffsetBefore(mEditable, selStart);
+        }
         if (selEnd > selStart) {
           // Delete the selection.
           Selection.setSelection(mEditable, selStart);
           mEditable.delete(selStart, selEnd);
           updateEditingState();
           return true;
-        } else if (selStart > 0) {
-          // Delete to the left/right of the cursor depending on direction of text.
-          // TODO(garyq): Explore how to obtain per-character direction. The
-          // isRTLCharAt() call below is returning blanket direction assumption
-          // based on the first character in the line.
-          boolean isRtl = mLayout.isRtlCharAt(mLayout.getLineForOffset(selStart));
-          try {
-            if (isRtl) {
-              Selection.extendRight(mEditable, mLayout);
-            } else {
-              Selection.extendLeft(mEditable, mLayout);
-            }
-          } catch (IndexOutOfBoundsException e) {
-            // On some Chinese devices (primarily Huawei, some Xiaomi),
-            // on initial app startup before focus is lost, the
-            // Selection.extendLeft and extendRight calls always extend
-            // from the index of the initial contents of mEditable. This
-            // try-catch will prevent crashing on Huawei devices by falling
-            // back to a simple way of deletion, although this a hack and
-            // will not handle emojis.
-            Selection.setSelection(mEditable, selStart, selStart - 1);
-          }
-          int newStart = clampIndexToEditable(Selection.getSelectionStart(mEditable), mEditable);
-          int newEnd = clampIndexToEditable(Selection.getSelectionEnd(mEditable), mEditable);
-          Selection.setSelection(mEditable, Math.min(newStart, newEnd));
-          // Min/Max the values since RTL selections will start at a higher
-          // index than they end at.
-          mEditable.delete(Math.min(newStart, newEnd), Math.max(newStart, newEnd));
-          updateEditingState();
-          return true;
         }
+        return false;
       } else if (event.getKeyCode() == KeyEvent.KEYCODE_DPAD_LEFT) {
         int selStart = Selection.getSelectionStart(mEditable);
         int selEnd = Selection.getSelectionEnd(mEditable);
         if (selStart == selEnd && !event.isShiftPressed()) {
-          int newSel = Math.max(selStart - 1, 0);
+          int newSel = Math.max(flutterTextUtils.getOffsetBefore(mEditable, selStart), 0);
           setSelection(newSel, newSel);
         } else {
-          int newSelEnd = Math.max(selEnd - 1, 0);
+          int newSelEnd = Math.max(flutterTextUtils.getOffsetBefore(mEditable, selEnd), 0);
           setSelection(selStart, newSelEnd);
         }
         return true;
@@ -353,10 +354,12 @@ class InputConnectionAdaptor extends BaseInputConnection {
         int selStart = Selection.getSelectionStart(mEditable);
         int selEnd = Selection.getSelectionEnd(mEditable);
         if (selStart == selEnd && !event.isShiftPressed()) {
-          int newSel = Math.min(selStart + 1, mEditable.length());
+          int newSel =
+              Math.min(flutterTextUtils.getOffsetAfter(mEditable, selStart), mEditable.length());
           setSelection(newSel, newSel);
         } else {
-          int newSelEnd = Math.min(selEnd + 1, mEditable.length());
+          int newSelEnd =
+              Math.min(flutterTextUtils.getOffsetAfter(mEditable, selEnd), mEditable.length());
           setSelection(selStart, newSelEnd);
         }
         return true;

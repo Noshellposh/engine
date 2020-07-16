@@ -15,13 +15,86 @@ G_BEGIN_DECLS
 
 G_DECLARE_FINAL_TYPE(FlDartProject, fl_dart_project, FL, DART_PROJECT, GObject)
 
-FlDartProject* fl_dart_project_new(const gchar* path);
+/**
+ * FlDartProject:
+ *
+ * #FlDartProject represents a Dart project. It is used to provide information
+ * about the application when creating an #FlView.
+ */
 
-const gchar* fl_dart_project_get_path(FlDartProject* project);
+/**
+ * fl_dart_project_new:
+ *
+ * Creates a Flutter project for the currently running executable. The following
+ * data files are required relative to the location of the executable:
+ * - data/flutter_assets/ (as built by the Flutter tool).
+ * - data/icudtl.dat (provided as a resource by the Flutter tool).
+ * - lib/libapp.so (as built by the Flutter tool when in AOT mode).
+ *
+ * Returns: a new #FlDartProject.
+ */
+FlDartProject* fl_dart_project_new();
 
-gchar* fl_dart_project_get_assets_path(FlDartProject* project);
+/**
+ * fl_dart_project_set_enable_mirrors:
+ * @project: an #FlDartProject.
+ * @enable_mirrors: %TRUE if the dart:mirrors library should be used.
+ *
+ * Sets if this Flutter project can use the dart:mirrors library.
+ *
+ * Deprecated: This function is temporary and will be removed in a future
+ * release.
+ */
+void fl_dart_project_set_enable_mirrors(FlDartProject* project,
+                                        gboolean enable_mirrors) G_DEPRECATED;
 
-gchar* fl_dart_project_get_icu_data_path(FlDartProject* project);
+/**
+ * fl_dart_project_get_enable_mirrors:
+ * @project: an #FlDartProject.
+ *
+ * Gets if this Flutter project can use the dart:mirrors library.
+ *
+ * Returns: %TRUE if the dart:mirrors library can be used.
+ *
+ * Deprecated: This function is temporary and will be removed in a future
+ * release.
+ */
+gboolean fl_dart_project_get_enable_mirrors(FlDartProject* project)
+    G_DEPRECATED;
+
+/**
+ * fl_dart_project_get_aot_library_path:
+ * @project: an #FlDartProject.
+ *
+ * Gets the path to the AOT library in the Flutter application.
+ *
+ * Returns: (type filename): an absolute file path, e.g.
+ * "/projects/my_dart_project/lib/libapp.so".
+ */
+const gchar* fl_dart_project_get_aot_library_path(FlDartProject* project);
+
+/**
+ * fl_dart_project_get_assets_path:
+ * @project: an #FlDartProject.
+ *
+ * Gets the path to the directory containing the assets used in the Flutter
+ * application.
+ *
+ * Returns: (type filename): an absolute directory path, e.g.
+ * "/projects/my_dart_project/data/flutter_assets".
+ */
+const gchar* fl_dart_project_get_assets_path(FlDartProject* project);
+
+/**
+ * fl_dart_project_get_icu_data_path:
+ * @project: an #FlDartProject.
+ *
+ * Gets the path to the ICU data file in the Flutter application.
+ *
+ * Returns: (type filename): an absolute file path, e.g.
+ * "/projects/my_dart_project/data/icudtl.dat".
+ */
+const gchar* fl_dart_project_get_icu_data_path(FlDartProject* project);
 
 G_END_DECLS
 

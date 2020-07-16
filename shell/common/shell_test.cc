@@ -20,14 +20,9 @@ namespace flutter {
 namespace testing {
 
 ShellTest::ShellTest()
-    : native_resolver_(std::make_shared<TestDartNativeResolver>()),
-      thread_host_("io.flutter.test." + GetCurrentTestName() + ".",
+    : thread_host_("io.flutter.test." + GetCurrentTestName() + ".",
                    ThreadHost::Type::Platform | ThreadHost::Type::IO |
-                       ThreadHost::Type::UI | ThreadHost::Type::GPU),
-      assets_dir_(fml::OpenDirectory(GetFixturesPath(),
-                                     false,
-                                     fml::FilePermission::kRead)),
-      aot_symbols_(LoadELFSymbolFromFixturesIfNeccessary()) {}
+                       ThreadHost::Type::UI | ThreadHost::Type::GPU) {}
 
 void ShellTest::SendEnginePlatformMessage(
     Shell* shell,
@@ -42,27 +37,6 @@ void ShellTest::SendEnginePlatformMessage(
         latch.Signal();
       });
   latch.Wait();
-}
-
-void ShellTest::SetSnapshotsAndAssets(Settings& settings) {
-  if (!assets_dir_.is_valid()) {
-    return;
-  }
-
-  settings.assets_dir = assets_dir_.get();
-
-  // In JIT execution, all snapshots are present within the binary itself and
-  // don't need to be explicitly suppiled by the embedder.
-  if (DartVM::IsRunningPrecompiledCode()) {
-    PrepareSettingsForAOTWithSymbols(settings, aot_symbols_);
-  } else {
-    settings.application_kernels = [this]() {
-      std::vector<std::unique_ptr<const fml::Mapping>> kernel_mappings;
-      kernel_mappings.emplace_back(
-          fml::FileMapping::CreateReadOnly(assets_dir_, "kernel_blob.bin"));
-      return kernel_mappings;
-    };
-  }
 }
 
 void ShellTest::PlatformViewNotifyCreated(Shell* shell) {
@@ -202,17 +176,28 @@ bool ShellTest::GetNeedsReportTimings(Shell* shell) {
   return shell->needs_report_timings_;
 }
 
-void ShellTest::OnServiceProtocolGetSkSLs(
+void ShellTest::OnServiceProtocol(
     Shell* shell,
+    ServiceProtocolEnum some_protocol,
+    fml::RefPtr<fml::TaskRunner> task_runner,
     const ServiceProtocol::Handler::ServiceProtocolMap& params,
     rapidjson::Document& response) {
   std::promise<bool> finished;
-  fml::TaskRunner::RunNowOrPostTask(shell->GetTaskRunners().GetIOTaskRunner(),
-                                    [shell, params, &response, &finished]() {
-                                      shell->OnServiceProtocolGetSkSLs(
-                                          params, response);
-                                      finished.set_value(true);
-                                    });
+  fml::TaskRunner::RunNowOrPostTask(
+      task_runner, [shell, some_protocol, params, &response, &finished]() {
+        switch (some_protocol) {
+          case ServiceProtocolEnum::kGetSkSLs:
+            shell->OnServiceProtocolGetSkSLs(params, response);
+            break;
+          case ServiceProtocolEnum::kSetAssetBundlePath:
+            shell->OnServiceProtocolSetAssetBundlePath(params, response);
+            break;
+          case ServiceProtocolEnum::kRunInView:
+            shell->OnServiceProtocolRunInView(params, response);
+            break;
+        }
+        finished.set_value(true);
+      });
   finished.get_future().wait();
 }
 
@@ -260,9 +245,12 @@ std::unique_ptr<Shell> ShellTest::CreateShell(Settings settings,
                      simulate_vsync);
 }
 
-std::unique_ptr<Shell> ShellTest::CreateShell(Settings settings,
-                                              TaskRunners task_runners,
-                                              bool simulate_vsync) {
+std::unique_ptr<Shell> ShellTest::CreateShell(
+    Settings settings,
+    TaskRunners task_runners,
+    bool simulate_vsync,
+    std::shared_ptr<ShellTestExternalViewEmbedder>
+        shell_test_external_view_embedder) {
   const auto vsync_clock = std::make_shared<ShellTestVsyncClock>();
   CreateVsyncWaiter create_vsync_waiter = [&]() {
     if (simulate_vsync) {
@@ -275,17 +263,19 @@ std::unique_ptr<Shell> ShellTest::CreateShell(Settings settings,
   };
   return Shell::Create(
       task_runners, settings,
-      [vsync_clock, &create_vsync_waiter](Shell& shell) {
+      [vsync_clock, &create_vsync_waiter,
+       shell_test_external_view_embedder](Shell& shell) {
         return ShellTestPlatformView::Create(
             shell, shell.GetTaskRunners(), vsync_clock,
             std::move(create_vsync_waiter),
-            ShellTestPlatformView::BackendType::kDefaultBackend);
+            ShellTestPlatformView::BackendType::kDefaultBackend,
+            shell_test_external_view_embedder);
       },
       [](Shell& shell) {
-        return std::make_unique<Rasterizer>(shell, shell.GetTaskRunners());
+        return std::make_unique<Rasterizer>(shell, shell.GetTaskRunners(),
+                                            shell.GetIsGpuDisabledSyncSwitch());
       });
 }
-
 void ShellTest::DestroyShell(std::unique_ptr<Shell> shell) {
   DestroyShell(std::move(shell), GetTaskRunnersForFixture());
 }
@@ -299,11 +289,6 @@ void ShellTest::DestroyShell(std::unique_ptr<Shell> shell,
                                       latch.Signal();
                                     });
   latch.Wait();
-}
-
-void ShellTest::AddNativeCallback(std::string name,
-                                  Dart_NativeFunction callback) {
-  native_resolver_->AddNativeCallback(std::move(name), callback);
 }
 
 }  // namespace testing

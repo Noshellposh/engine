@@ -22,17 +22,35 @@
 #include "flutter/shell/platform/darwin/ios/framework/Source/FlutterView.h"
 #include "flutter/shell/platform/darwin/ios/framework/Source/SemanticsObject.h"
 #include "flutter/shell/platform/darwin/ios/framework/Source/accessibility_bridge_ios.h"
-#include "third_party/skia/include/core/SkMatrix44.h"
 #include "third_party/skia/include/core/SkRect.h"
 
 namespace flutter {
 class PlatformViewIOS;
 
+/**
+ * An accessibility instance is bound to one `FlutterViewController` and
+ * `FlutterView` instance.
+ *
+ * It helps populate the UIView's accessibilityElements property from Flutter's
+ * semantics nodes.
+ */
 class AccessibilityBridge final : public AccessibilityBridgeIos {
  public:
+  /** Delegate for handling iOS operations. */
+  class IosDelegate {
+   public:
+    virtual ~IosDelegate() = default;
+    /// Returns true when the FlutterViewController associated with the `view`
+    /// is presenting a modal view controller.
+    virtual bool IsFlutterViewControllerPresentingModalViewController(UIView* view) = 0;
+    virtual void PostAccessibilityNotification(UIAccessibilityNotifications notification,
+                                               id argument) = 0;
+  };
+
   AccessibilityBridge(UIView* view,
                       PlatformViewIOS* platform_view,
-                      FlutterPlatformViewsController* platform_views_controller);
+                      FlutterPlatformViewsController* platform_views_controller,
+                      std::unique_ptr<IosDelegate> ios_delegate = nullptr);
   ~AccessibilityBridge();
 
   void UpdateSemantics(flutter::SemanticsNodeUpdates nodes,
@@ -69,6 +87,7 @@ class AccessibilityBridge final : public AccessibilityBridgeIos {
   int32_t previous_route_id_;
   std::unordered_map<int32_t, flutter::CustomAccessibilityAction> actions_;
   std::vector<int32_t> previous_routes_;
+  std::unique_ptr<IosDelegate> ios_delegate_;
 
   FML_DISALLOW_COPY_AND_ASSIGN(AccessibilityBridge);
 };

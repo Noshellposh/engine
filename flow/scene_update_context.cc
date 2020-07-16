@@ -4,8 +4,11 @@
 
 #include "flutter/flow/scene_update_context.h"
 
+#include <lib/ui/scenic/cpp/view_token_pair.h>
+
 #include "flutter/flow/layers/layer.h"
 #include "flutter/flow/matrix_decomposition.h"
+#include "flutter/flow/view_holder.h"
 #include "flutter/fml/trace_event.h"
 #include "include/core/SkColor.h"
 
@@ -223,6 +226,37 @@ SceneUpdateContext::ExecutePaintTasks(CompositorContext::ScopedFrame& frame) {
   return surfaces_to_submit;
 }
 
+void SceneUpdateContext::UpdateScene(int64_t view_id,
+                                     const SkPoint& offset,
+                                     const SkSize& size) {
+  auto* view_holder = ViewHolder::FromId(view_id);
+  FML_DCHECK(view_holder);
+
+  view_holder->SetProperties(size.width(), size.height(), 0, 0, 0, 0,
+                             view_holder->focusable());
+  view_holder->UpdateScene(*this, offset, size,
+                           SkScalarRoundToInt(alphaf() * 255),
+                           view_holder->hit_testable());
+}
+
+void SceneUpdateContext::CreateView(int64_t view_id,
+                                    bool hit_testable,
+                                    bool focusable) {
+  zx_handle_t handle = (zx_handle_t)view_id;
+  flutter::ViewHolder::Create(handle, nullptr,
+                              scenic::ToViewHolderToken(zx::eventpair(handle)),
+                              nullptr);
+  auto* view_holder = ViewHolder::FromId(view_id);
+  FML_DCHECK(view_holder);
+
+  view_holder->set_hit_testable(hit_testable);
+  view_holder->set_focusable(focusable);
+}
+
+void SceneUpdateContext::DestroyView(int64_t view_id) {
+  ViewHolder::Destroy(view_id);
+}
+
 SceneUpdateContext::Entity::Entity(SceneUpdateContext& context)
     : context_(context),
       previous_entity_(context.top_entity_),
@@ -250,22 +284,22 @@ SceneUpdateContext::Transform::Transform(SceneUpdateContext& context,
     if (decomposition.IsValid()) {
       // Don't allow clients to control the z dimension; we control that
       // instead to make sure layers appear in proper order.
-      entity_node().SetTranslation(decomposition.translation().x(),  //
-                                   decomposition.translation().y(),  //
-                                   0.f                               //
+      entity_node().SetTranslation(decomposition.translation().x,  //
+                                   decomposition.translation().y,  //
+                                   0.f                             //
       );
 
-      entity_node().SetScale(decomposition.scale().x(),  //
-                             decomposition.scale().y(),  //
-                             1.f                         //
+      entity_node().SetScale(decomposition.scale().x,  //
+                             decomposition.scale().y,  //
+                             1.f                       //
       );
-      context.top_scale_x_ *= decomposition.scale().x();
-      context.top_scale_y_ *= decomposition.scale().y();
+      context.top_scale_x_ *= decomposition.scale().x;
+      context.top_scale_y_ *= decomposition.scale().y;
 
-      entity_node().SetRotation(decomposition.rotation().fData[0],  //
-                                decomposition.rotation().fData[1],  //
-                                decomposition.rotation().fData[2],  //
-                                decomposition.rotation().fData[3]   //
+      entity_node().SetRotation(decomposition.rotation().x,  //
+                                decomposition.rotation().y,  //
+                                decomposition.rotation().z,  //
+                                decomposition.rotation().w   //
       );
     }
   }

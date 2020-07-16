@@ -154,7 +154,8 @@ class RuntimeController final : public WindowClient {
   /// @deprecated The persistent isolate data must be used for this purpose
   ///             instead.
   ///
-  /// @param[in]  locale_data  The locale data
+  /// @param[in]  locale_data  The locale data. This should consist of groups of
+  ///             4 strings, each group representing a single locale.
   ///
   /// @return     If the locale data was forwarded to the running isolate.
   ///
@@ -503,6 +504,10 @@ class RuntimeController final : public WindowClient {
 
   // |WindowClient|
   std::shared_ptr<const fml::Mapping> GetPersistentIsolateData() override;
+
+  // |WindowClient|
+  std::unique_ptr<std::vector<std::string>> ComputePlatformResolvedLocale(
+      const std::vector<std::string>& supported_locale_data) override;
 
   FML_DISALLOW_COPY_AND_ASSIGN(RuntimeController);
 };
